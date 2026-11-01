@@ -5,6 +5,7 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
@@ -36,6 +37,7 @@ public class OutboxMessagePublisher {
      *
      */
     @Scheduled(fixedDelay = 1000)
+    @SchedulerLock(name = "OutboxMessagePublisher", lockAtMostFor = "PT30S", lockAtLeastFor = "PT10S")
     @Transactional
     public void deliver() {
         this.outboxMessageRepository.findTop10BySentOrderByIdAsc(false)
@@ -60,10 +62,15 @@ public class OutboxMessagePublisher {
 
         var customerCreated = new CustomerEvent.CustomerCreated(customerDTO.id(), createdAt, customerDTO);
         byte[] idAsByteArray = customerCreated.customerId().toString().getBytes(StandardCharsets.UTF_8);
-        return MessageBuilder.withPayload(customerCreated)
+
+        Message<CustomerEvent.CustomerCreated> message = MessageBuilder.withPayload(customerCreated)
                 .setHeader("X-EVENT-TYPE", "CustomerCreated")
                 .setHeader("X-CORRELATION-ID", customerCreated.customerId())
                 .setHeader(KafkaHeaders.KEY, idAsByteArray)
                 .build();
+
+        log.atDebug().log("Prepared Kafka message: {}", message);
+
+        return message;
     }
 }
